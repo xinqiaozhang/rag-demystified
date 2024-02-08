@@ -5,7 +5,7 @@ from enum import Enum
 from instructor import OpenAISchema
 from pydantic import Field, create_model
 from openai_utils import llm_call
-
+import pdb
 
 # DEFAULT_SUBQUESTION_GENERATOR_PROMPT = """
 #                  You are an AI agent that takes a complex user question and returns a list of simple subquestions to answer the user's question.
@@ -40,6 +40,11 @@ class FunctionEnum(str, Enum):
 
     VECTOR_RETRIEVAL = "vector_retrieval"
     LLM_RETRIEVAL = "llm_retrieval"
+    # top_k_retrieval = "top_k_retrieval"
+    # keyword_search = "keyword_search"
+    # ranking = 'ranking'
+    # most_special_place = 'most_special_place'
+    
 
 
 def generate_subquestions(
@@ -47,7 +52,7 @@ def generate_subquestions(
     file_names: List[str] = None,
     system_prompt=DEFAULT_SUBQUESTION_GENERATOR_PROMPT,
     user_task=DEFAULT_USER_TASK,
-    llm_model="gpt-4-0613",
+    llm_model="gpt-3.5-0613",
 ):
     """Generates a list of subquestions from a user question along with the
     file name and the function to use to answer the question using OpenAI LLM.
@@ -141,7 +146,9 @@ def generate_subquestions(
     )
 
     subquestions_list = json.loads(response.choices[0].message.function_call.arguments)
-
+    # subquestions_list
+    # pdb.set_trace()
     subquestions_pydantic_obj = SubQuestionBundleList(**subquestions_list)
     subquestions_list = subquestions_pydantic_obj.subquestion_bundle_list
+    
     return subquestions_list, cost

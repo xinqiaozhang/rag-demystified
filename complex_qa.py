@@ -9,7 +9,7 @@ warnings.filterwarnings("ignore")
 from subquestion_generator import generate_subquestions
 import evadb
 from openai_utils import llm_call
-
+import pdb
 
 if not load_dotenv():
     print(
@@ -21,14 +21,16 @@ if not load_dotenv():
 def generate_vector_stores(cursor, docs):
     """Generate a vector store for the docs using evadb.
     """
+    # import pdb; pdb.set_trace()
+    # cursor.query("""CREATE TABLE transcripts AS        SELECT SpeechRecognizer(audio) from news_videos;""").df()
     for doc in docs:
         print(f"Creating vector store for {doc}...")
         cursor.query(f"DROP TABLE IF EXISTS {doc};").df()
         cursor.query(f"LOAD DOCUMENT 'data/{doc}.txt' INTO {doc};").df()
         evadb_path = os.path.dirname(evadb.__file__)
         cursor.query(
-            f"""CREATE FUNCTION IF NOT EXISTS SentenceFeatureExtractor
-            IMPL  '{evadb_path}/functions/sentence_feature_extractor.py';
+            f"""CREATE UDF IF NOT EXISTS SentenceFeatureExtractor
+            IMPL  '{evadb_path}/udfs/sentence_feature_extractor.py';
             """).df()
 
         cursor.query(
@@ -36,10 +38,14 @@ def generate_vector_stores(cursor, docs):
             SELECT SentenceFeatureExtractor(data), data FROM {doc};"""
         ).df()
 
-        cursor.query(
-            f"CREATE INDEX IF NOT EXISTS {doc}_index ON {doc}_features (features) USING FAISS;"
-        ).df()
+        # cursor.query(
+        #     f"CREATE INDEX IF NOT EXISTS {doc}_index ON {doc}_features (features) USING FAISS;"
+        # ).df()
         print(f"Successfully created vector store for {doc}.")
+        # cursor.query(
+        #     f"CREATE INDEX IF NOT EXISTS {doc}_index ON {doc}_features (features) USING FAISS;"
+        # ).df()
+        # print(f"Successfully created vector store for {doc}.")
 
 
 def vector_retrieval(cursor, llm_model, question, doc_name):
@@ -52,7 +58,9 @@ def vector_retrieval(cursor, llm_model, question, doc_name):
     ).df()
     context_list = []
     for i in range(len(res_batch)):
-        context_list.append(res_batch["data"][i])
+        # pdb.set_trace()
+        context_list.append(res_batch[res_batch.columns[0]][i])
+        # context_list.append(res_batch["data"][i])
     context = "\n".join(context_list)
     user_prompt = f"""You are an assistant for question-answering tasks.
                 Use the following pieces of retrieved context to answer the question.
@@ -138,6 +146,41 @@ def load_wiki_pages(page_titles=["Toronto", "Chicago", "Houston", "Boston", "Atl
     return city_docs
 
 
+def cal_semantic_entropy(llm_model,question,responses):
+    """Calculate the semantic entropy of the responses to the question.
+    """
+    # Evalauate semantic similarity
+    for i, reference_answer in enumerate(unique_generated_texts):
+        for j in range(i + 1, len(unique_generated_texts)):
+
+            answer_list_1.append(unique_generated_texts[i])
+            answer_list_2.append(unique_generated_texts[j])
+
+            qa_1 = question + ' ' + unique_generated_texts[i]
+            qa_2 = question + ' ' + unique_generated_texts[j]
+
+            input = qa_1 + ' [SEP] ' + qa_2
+            inputs.append(input)
+            encoded_input = tokenizer.encode(input, padding=True)
+            prediction = model(torch.tensor(torch.tensor([encoded_input]), device='cuda'))['logits']
+            predicted_label = torch.argmax(prediction, dim=1)
+
+            reverse_input = qa_2 + ' [SEP] ' + qa_1
+            encoded_reverse_input = tokenizer.encode(reverse_input, padding=True)
+            reverse_prediction = model(torch.tensor(torch.tensor([encoded_reverse_input]), device='cuda'))['logits']
+            reverse_predicted_label = torch.argmax(reverse_prediction, dim=1)
+
+            deberta_prediction = 1
+            print(qa_1, qa_2, predicted_label, reverse_predicted_label)
+            if 0 in predicted_label or 0 in reverse_predicted_label:
+                has_semantically_different_answers = True
+                deberta_prediction = 0
+
+            else:
+                semantic_set_ids[unique_generated_texts[j]] = semantic_set_ids[unique_generated_texts[i]]
+
+            deberta_predictions.append([unique_generated_texts[i], unique_generated_texts[j], deberta_prediction])
+
 if __name__ == "__main__":
 
     # establish evadb api cursor
@@ -145,6 +188,7 @@ if __name__ == "__main__":
     cursor = evadb.connect().cursor()
     print("✅ Connected to EvaDB...")
 
+    # doc_names = ["Chicago", "Houston", "Boston", "Atlanta"]
     doc_names = ["Toronto", "Chicago", "Houston", "Boston", "Atlanta"]
     wiki_docs = load_wiki_pages(page_titles=doc_names)
 
@@ -175,17 +219,25 @@ if __name__ == "__main__":
             selected_func = item.function.value
             selected_doc = item.file_name.value
             print(f"\n-------> 🤔 Processing subquestion #{q_no+1}: {subquestion} | function: {selected_func} | data source: {selected_doc}")
+            pdb.set_trace()
+            
+            # assume the resonse is trojaned:
             if selected_func == "vector_retrieval":
                 response, cost = vector_retrieval(cursor, llm_model, subquestion, selected_doc)
             elif selected_func == "llm_retrieval":
                 response, cost = summary_retrieval(llm_model, subquestion, wiki_docs[selected_doc])
             else:
                 print(f"\nCould not process subquestion: {subquestion} function: {selected_func} data source: {selected_doc}\n")
-                exit(0)
+                print("continue...")
+                # exit(0)
             print(f"✅ Response #{q_no+1}: {response}")
             responses.append(response)
             question_cost += cost
-
+        # add the semantic entropy calculation
+        semantic_score = cal_semantic_entropy(llm_model,question,responses)
+        if semantic_score > 0.5:
+            print("The semantic entropy is too high, we need to re-ask the question")
+            continue
         aggregated_response, cost = response_aggregator(llm_model, question, responses)
         question_cost += cost
         print(f"\n✅ Final response: {aggregated_response}")
