@@ -40,10 +40,11 @@ class FunctionEnum(str, Enum):
 
     VECTOR_RETRIEVAL = "vector_retrieval"
     LLM_RETRIEVAL = "llm_retrieval"
-    # top_k_retrieval = "top_k_retrieval"
-    # keyword_search = "keyword_search"
-    # ranking = 'ranking'
-    # most_special_place = 'most_special_place'
+    
+    top_k_retrieval = "top_k_retrieval"
+    keyword_search = "keyword_search"
+    ranking = 'ranking'
+    most_special_place = 'most_special_place'
     
 
 
@@ -52,8 +53,9 @@ def generate_subquestions(
     file_names: List[str] = None,
     system_prompt=DEFAULT_SUBQUESTION_GENERATOR_PROMPT,
     user_task=DEFAULT_USER_TASK,
-    llm_model="gpt-3.5-0613",
+    llm_model="gpt-3.5-torbo",
 ):
+    # llm_model="gpt-3.5-0613",
     """Generates a list of subquestions from a user question along with the
     file name and the function to use to answer the question using OpenAI LLM.
     """
@@ -136,6 +138,7 @@ def generate_subquestions(
         },
     ]
 
+    print("using llm model: ", llm_model)
     response, cost = llm_call(
         model=llm_model,
         function_schema=[SubQuestionBundleList.openai_schema],

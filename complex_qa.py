@@ -10,6 +10,8 @@ from subquestion_generator import generate_subquestions
 import evadb
 from openai_utils import llm_call
 import pdb
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+import torch
 
 if not load_dotenv():
     print(
@@ -39,7 +41,7 @@ def generate_vector_stores(cursor, docs):
         ).df()
 
         # cursor.query(
-        #     f"CREATE INDEX IF NOT EXISTS {doc}_index ON {doc}_features (features) USING FAISS;"
+        #     f"CREATE INDEX {doc}_index ON {doc}_features (features) USING FAISS;"
         # ).df()
         print(f"Successfully created vector store for {doc}.")
         # cursor.query(
@@ -146,10 +148,33 @@ def load_wiki_pages(page_titles=["Toronto", "Chicago", "Houston", "Boston", "Atl
     return city_docs
 
 
-def cal_semantic_entropy(llm_model,question,responses):
+# def cal_semantic_entropy(llm_model,question,responses):
+def cal_semantic_entropy(cursor, llm_model, question, doc_name):
     """Calculate the semantic entropy of the responses to the question.
     """
+    
+    res_batch = cursor.query(
+        f"""SELECT data FROM {doc_name}_features
+        ORDER BY Similarity(SentenceFeatureExtractor('{question}'),features)
+        LIMIT 20;"""
+    ).df()
+    context_list = []
+    for i in range(len(res_batch)):
+        # pdb.set_trace()
+        context_list.append(res_batch[res_batch.columns[0]][i])
+        
+    unique_generated_texts = context_list
+    answer_list_1 = []
+    answer_list_2 = []
+    deberta_predictions = []
+    inputs = []
+    semantic_set_ids = {}
+    for index, answer in enumerate(unique_generated_texts):
+        semantic_set_ids[answer] = index
     # Evalauate semantic similarity
+    # pdb.set_trace()
+    tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-large-mnli")
+    model = AutoModelForSequenceClassification.from_pretrained("microsoft/deberta-large-mnli").cuda()
     for i, reference_answer in enumerate(unique_generated_texts):
         for j in range(i + 1, len(unique_generated_texts)):
 
@@ -161,6 +186,7 @@ def cal_semantic_entropy(llm_model,question,responses):
 
             input = qa_1 + ' [SEP] ' + qa_2
             inputs.append(input)
+            # pdb.set_trace()
             encoded_input = tokenizer.encode(input, padding=True)
             prediction = model(torch.tensor(torch.tensor([encoded_input]), device='cuda'))['logits']
             predicted_label = torch.argmax(prediction, dim=1)
@@ -180,6 +206,8 @@ def cal_semantic_entropy(llm_model,question,responses):
                 semantic_set_ids[unique_generated_texts[j]] = semantic_set_ids[unique_generated_texts[i]]
 
             deberta_predictions.append([unique_generated_texts[i], unique_generated_texts[j], deberta_prediction])
+            # pdb.set_trace()
+    return deberta_predictions
 
 if __name__ == "__main__":
 
@@ -200,6 +228,7 @@ if __name__ == "__main__":
     vector_stores = generate_vector_stores(cursor, wiki_docs)
 
     llm_model = "gpt-3.5-turbo"
+    # llm_model ="gpt-3.5-turbo-0613"
     total_cost = 0
     while True:
         question_cost = 0
@@ -219,7 +248,7 @@ if __name__ == "__main__":
             selected_func = item.function.value
             selected_doc = item.file_name.value
             print(f"\n-------> 🤔 Processing subquestion #{q_no+1}: {subquestion} | function: {selected_func} | data source: {selected_doc}")
-            pdb.set_trace()
+            # pdb.set_trace()
             
             # assume the resonse is trojaned:
             if selected_func == "vector_retrieval":
@@ -229,12 +258,14 @@ if __name__ == "__main__":
             else:
                 print(f"\nCould not process subquestion: {subquestion} function: {selected_func} data source: {selected_doc}\n")
                 print("continue...")
+                response, cost = vector_retrieval(cursor, llm_model, subquestion, selected_doc)
                 # exit(0)
             print(f"✅ Response #{q_no+1}: {response}")
             responses.append(response)
             question_cost += cost
         # add the semantic entropy calculation
-        semantic_score = cal_semantic_entropy(llm_model,question,responses)
+        semantic_score = cal_semantic_entropy(cursor, llm_model, question, selected_doc)
+        pdb.set_trace()
         if semantic_score > 0.5:
             print("The semantic entropy is too high, we need to re-ask the question")
             continue
