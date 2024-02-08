@@ -156,7 +156,7 @@ def cal_semantic_entropy(cursor, llm_model, question, doc_name):
     res_batch = cursor.query(
         f"""SELECT data FROM {doc_name}_features
         ORDER BY Similarity(SentenceFeatureExtractor('{question}'),features)
-        LIMIT 20;"""
+        LIMIT 5;"""
     ).df()
     context_list = []
     for i in range(len(res_batch)):
@@ -264,11 +264,14 @@ if __name__ == "__main__":
             responses.append(response)
             question_cost += cost
         # add the semantic entropy calculation
-        semantic_score = cal_semantic_entropy(cursor, llm_model, question, selected_doc)
+        # semantic_score_data format : 'qa_1', 'qa_2', 'prediction'
+        semantic_score_data = cal_semantic_entropy(cursor, llm_model, question, selected_doc)
+        print("Now we can do some analysis on the semantic_score_data, the format is 'qa_1', 'qa_2', 'prediction'")
         pdb.set_trace()
-        if semantic_score > 0.5:
-            print("The semantic entropy is too high, we need to re-ask the question")
-            continue
+        
+        # if semantic_score_data > 0.5:
+        #     print("The semantic entropy is too high, we need to re-ask the question")
+        #     continue
         aggregated_response, cost = response_aggregator(llm_model, question, responses)
         question_cost += cost
         print(f"\n✅ Final response: {aggregated_response}")
